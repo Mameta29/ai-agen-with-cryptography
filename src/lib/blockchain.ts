@@ -1,4 +1,4 @@
-import { createWalletClient, createPublicClient, http, parseUnits, formatUnits, Address } from 'viem';
+import { createWalletClient, createPublicClient, http, parseUnits, formatUnits, Address, encodeFunctionData } from 'viem';
 import { sepolia } from 'viem/chains';
 import { privateKeyToAccount } from 'viem/accounts';
 import { InvoiceData } from './gmail';
@@ -68,7 +68,18 @@ export class BlockchainService {
   private account: any;
 
   constructor(privateKey: string, rpcUrl: string) {
-    this.account = privateKeyToAccount(privateKey as `0x${string}`);
+    // 秘密鍵の形式を正規化（0xプレフィックスを追加）
+    const normalizedPrivateKey = privateKey.startsWith('0x') 
+      ? privateKey 
+      : `0x${privateKey}`;
+    
+    console.log('🔑 Private Key format check:', {
+      original: privateKey.substring(0, 10) + '...',
+      normalized: normalizedPrivateKey.substring(0, 10) + '...',
+      length: normalizedPrivateKey.length
+    });
+    
+    this.account = privateKeyToAccount(normalizedPrivateKey as `0x${string}`);
     
     this.publicClient = createPublicClient({
       chain: sepolia,
@@ -108,6 +119,14 @@ export class BlockchainService {
         }),
       ]);
 
+      const balanceFormatted = formatUnits(balance as bigint, decimals as number);
+      console.log('💰 トークン情報取得:', { 
+        symbol, 
+        decimals, 
+        balance: balance.toString(),
+        balanceFormatted: balanceFormatted + ' ' + symbol
+      });
+
       return {
         address: tokenAddress,
         symbol: symbol as string,
@@ -143,13 +162,36 @@ export class BlockchainService {
       }
 
       // transfer関数のdata encodingを準備
-      const { request } = await this.publicClient.simulateContract({
+      console.log('🔧 ERC20 transfer関数エンコード:', {
+        account: this.account.address,
+        tokenAddress,
+        recipientAddress,
+        amount: amount.toString(),
+        functionName: 'transfer'
+      });
+      
+      // ERC20 transfer関数のデータをエンコード
+      const data = encodeFunctionData({
+        abi: JPYC_ABI,
+        functionName: 'transfer',
+        args: [recipientAddress, amount],
+      });
+      
+      console.log('✅ transfer関数エンコード成功:', {
+        data,
+        dataLength: data.length
+      });
+      
+      // simulateContractでトランザクションを検証
+      await this.publicClient.simulateContract({
         account: this.account,
         address: tokenAddress,
         abi: JPYC_ABI,
         functionName: 'transfer',
         args: [recipientAddress, amount],
       });
+      
+      console.log('✅ simulateContract検証成功');
 
       // ガス見積もり
       const gasEstimate = await this.publicClient.estimateContractGas({
@@ -160,15 +202,29 @@ export class BlockchainService {
         args: [recipientAddress, amount],
       });
 
-      // ガス価格を取得
-      const gasPrice = await this.publicClient.getGasPrice();
+      // ガス価格を取得（20%マージンを追加）
+      const baseGasPrice = await this.publicClient.getGasPrice();
+      const gasPrice = baseGasPrice + (baseGasPrice / BigInt(5)); // 20%増加
+
+      console.log('🔧 トランザクション詳細:', {
+        to: tokenAddress,
+        recipient: recipientAddress,
+        amount: amount.toString(),
+        data,
+        gasEstimate: gasEstimate.toString(),
+        gasPrice: gasPrice.toString()
+      });
+
+      if (!data || data === '0x') {
+        throw new Error('Failed to encode ERC20 transfer function data');
+      }
 
       return {
         to: tokenAddress,
         amount,
-        data: request.data || '0x',
-        value: 0n, // ERC20 transferは ETH value = 0
-        gas: gasEstimate + (gasEstimate / 10n), // 10%のマージンを追加
+        data,
+        value: BigInt(0), // ERC20 transferは ETH value = 0
+        gas: gasEstimate + (gasEstimate / BigInt(5)), // 20%のマージンを追加
         gasPrice,
       };
     } catch (error) {
