@@ -1,0 +1,56 @@
+{
+  "mcpServers": {
+    "aya-gmail-automation": {
+      "command": "node",
+      "args": ["mcp-server.js"],
+      "env": {
+        "GOOGLE_CLIENT_ID": "${GOOGLE_CLIENT_ID}",
+        "GOOGLE_CLIENT_SECRET": "${GOOGLE_CLIENT_SECRET}",
+        "GOOGLE_REDIRECT_URI": "${GOOGLE_REDIRECT_URI}",
+        "GOOGLE_REFRESH_TOKEN": "${GOOGLE_REFRESH_TOKEN}",
+        "OPENAI_API_KEY": "${OPENAI_API_KEY}",
+        "PRIVATE_KEY": "${PRIVATE_KEY}",
+        "SEPOLIA_RPC_URL": "${SEPOLIA_RPC_URL}",
+        "JPYC_CONTRACT_ADDRESS": "${JPYC_CONTRACT_ADDRESS}"
+      }
+    }
+  },
+  "description": "AI Gmail Automation with ZKP - Ayaウォレット統合版",
+  "version": "1.0.0",
+  "tools": [
+    {
+      "name": "process_gmail_emails",
+      "description": "Gmail受信箱を自動処理し、AI分析→ZKP検証→ブロックチェーン実行を行う",
+      "category": "automation"
+    },
+    {
+      "name": "send_zkp_payment", 
+      "description": "ZKP証明付きでJPYC支払いを実行（ルール遵守を暗号学的に保証）",
+      "category": "payment"
+    },
+    {
+      "name": "schedule_meeting_with_zkp",
+      "description": "ZKP証明付きでGoogleカレンダーに予定を追加（スケジュールルール遵守を保証）",
+      "category": "calendar"
+    },
+    {
+      "name": "get_zkp_rules",
+      "description": "現在のZKPルール設定を取得（支払い・スケジュール制限）",
+      "category": "configuration"
+    }
+  ],
+  "features": [
+    "AI-powered email classification (GPT-5-nano)",
+    "Zero-Knowledge Proof verification for rule compliance",
+    "Automated JPYC payments on Sepolia testnet",
+    "Google Calendar integration with schedule validation",
+    "Cryptographic guarantee of rule adherence",
+    "Real-time blockchain transaction execution"
+  ],
+  "security": {
+    "zkp_circuits": ["payment_rules.circom", "address_whitelist.circom", "time_constraint.circom"],
+    "proof_system": "Groth16",
+    "blockchain": "Ethereum Sepolia Testnet",
+    "token": "JPYC (ERC20)"
+  }
+} 
