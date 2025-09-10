@@ -7,8 +7,9 @@
     "dev": "next dev",
     "lint": "next lint",
     "start": "next start",
-    "mcp-server": "node --loader ts-node/esm mcp-server.ts",
-    "build-mcp": "tsc mcp-server.ts --target es2022 --module esnext --moduleResolution bundler"
+    "build-mcp": "npx tsc mcp-server.ts --target es2020 --module commonjs --outDir dist",
+    "mcp-server": "npm run build-mcp && node dist/mcp-server.js",
+    "mcp-test": "npm run build-mcp && echo '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}' | node dist/mcp-server.js"
   },
   "dependencies": {
     "@ethereum-attestation-service/eas-sdk": "^2.5.0",
@@ -24,6 +25,7 @@
     "react": "^18",
     "react-dom": "^18",
     "snarkjs": "^0.7.4",
+    "ts-node": "^10.9.2",
     "viem": "^2.19.8"
   },
   "devDependencies": {
