@@ -6,19 +6,19 @@ import { Address } from 'viem';
 
 // ZKP統合版のEmailProcessorを取得
 function getEmailProcessor(): EmailProcessor {
-  const config: ProcessingConfig = {
-    gmailCredentials: {
-      clientId: process.env.GOOGLE_CLIENT_ID!,
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-      redirectUri: process.env.GOOGLE_REDIRECT_URI!,
-      refreshToken: process.env.GOOGLE_REFRESH_TOKEN!, // 実際の実装では、ユーザーごとに管理
-    },
-    openaiApiKey: process.env.OPENAI_API_KEY!,
-    blockchain: {
-      privateKey: process.env.PRIVATE_KEY!,
-      rpcUrl: process.env.SEPOLIA_RPC_URL!,
-      jpycTokenAddress: (process.env.JPYC_CONTRACT_ADDRESS || '0x0000000000000000000000000000000000000000') as Address,
-    },
+    const config: ProcessingConfig = {
+      gmailCredentials: {
+        clientId: process.env.GOOGLE_CLIENT_ID!,
+        clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+        redirectUri: process.env.GOOGLE_REDIRECT_URI!,
+        refreshToken: process.env.GOOGLE_REFRESH_TOKEN!, // 実際の実装では、ユーザーごとに管理
+      },
+      openaiApiKey: process.env.OPENAI_API_KEY!,
+      blockchain: {
+        privateKey: process.env.PRIVATE_KEY!,
+        rpcUrl: process.env.SEPOLIA_RPC_URL!,
+        jpycTokenAddress: (process.env.JPYC_CONTRACT_ADDRESS || '0x0000000000000000000000000000000000000000') as Address,
+      },
     paymentPolicy: {
       maxPerPayment: 100000, // 10万円
       maxPerDay: 500000,     // 50万円
@@ -64,9 +64,9 @@ function getEmailProcessor(): EmailProcessor {
 export async function POST(request: NextRequest) {
   try {
     console.log('🚀 ZKP統合版メール処理API開始');
-    
+
     const processor = getEmailProcessor();
-    
+
     // システム健全性チェック（簡略化）
     console.log('🔍 健全性チェックをスキップ - 直接処理開始');
     
@@ -88,7 +88,7 @@ export async function POST(request: NextRequest) {
     };
     
     console.log('📊 処理統計:', stats);
-    
+
     return NextResponse.json({
       success: true,
       message: `${results.length}件のメールを処理しました（ZKP統合版）`,
@@ -112,8 +112,8 @@ export async function POST(request: NextRequest) {
     console.error('❌ ZKP統合版メール処理APIエラー:', error);
     
     return NextResponse.json({
-      success: false,
-      error: error instanceof Error ? error.message : 'Unknown error',
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
       message: 'ZKP統合版メール処理中にエラーが発生しました'
     }, { status: 500 });
   }
@@ -127,7 +127,7 @@ export async function GET(request: NextRequest) {
   try {
     const processor = getEmailProcessor();
     const healthCheck = await processor.healthCheck();
-    
+
     return NextResponse.json({
       success: true,
       message: 'ZKP統合版Gmail自動化システム',
@@ -151,8 +151,8 @@ export async function GET(request: NextRequest) {
     console.error('❌ システム状態確認エラー:', error);
     
     return NextResponse.json({
-      success: false,
-      error: error instanceof Error ? error.message : 'Unknown error',
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
       message: 'システム状態の確認中にエラーが発生しました'
     }, { status: 500 });
   }
