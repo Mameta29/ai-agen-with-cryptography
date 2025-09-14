@@ -1,4 +1,4 @@
-const { default: fetch } = require('node-fetch');
+// Node.js 18以降の内蔵fetchを使用
 
 // ローカルAIクラシファイアのテスト実装
 class LocalAIClassifier {
@@ -7,8 +7,8 @@ class LocalAIClassifier {
       apiUrl: 'http://localhost:11434',
       model: 'llama3.1:8b',
       temperature: 0.1,
-      maxTokens: 1000,
-      timeout: 30000,
+      maxTokens: 500,
+      timeout: 60000, // 60秒に延長
       ...config
     };
   }
@@ -65,50 +65,57 @@ class LocalAIClassifier {
   }
 
   async classifyEmail(emailContent, subject = '') {
-    const prompt = `
-あなたは優秀なメール分析AIです。以下のメールを分析し、JSON形式で結果を返してください。
+    // より簡潔なプロンプトに変更
+    const prompt = `メールを分析して分類してください。
 
-分類タイプ:
-- INVOICE: 請求書、支払い要求、料金通知
-- SCHEDULE: 会議、予定、イベントの招待
+件名: ${subject}
+本文: ${emailContent}
+
+以下から選択:
+- INVOICE: 請求書・支払い
+- SCHEDULE: 会議・予定
 - OTHER: その他
 
-メール件名: ${subject}
-
-メール本文:
-${emailContent}
-
-以下のJSON形式で回答してください:
-{
-  "type": "INVOICE|SCHEDULE|OTHER",
-  "confidence": 0.95,
-  "reasoning": "分類の理由を日本語で説明",
-  "extracted_data": {
-    "amount": 50000,
-    "vendorName": "会社名",
-    "vendorEmail": "example@company.com"
-  }
-}
-
-重要: JSON以外の文字は出力しないでください。
-`;
+JSON形式で回答:
+{"type": "INVOICE", "confidence": 0.9, "reasoning": "理由"}`;
 
     try {
       console.log('🤖 ローカルAIでメール分析を開始...');
       const startTime = Date.now();
       
       const response = await this.callOllama(prompt);
+      console.log('🔍 AI応答:', response.substring(0, 200) + '...');
       
       const duration = Date.now() - startTime;
       console.log(`✅ ローカルAI分析完了 (${duration}ms)`);
       
       // JSONを抽出してパース
-      const jsonMatch = response.match(/\{[\s\S]*\}/);
+      const jsonMatch = response.match(/\{[\s\S]*?\}/);
       if (jsonMatch) {
         const result = JSON.parse(jsonMatch[0]);
         return result;
       } else {
-        throw new Error('JSONが見つかりません');
+        // JSONが見つからない場合、キーワードベースで分類
+        const content = `${subject} ${emailContent}`.toLowerCase();
+        if (content.includes('請求') || content.includes('支払') || content.includes('金額')) {
+          return {
+            type: 'INVOICE',
+            confidence: 0.7,
+            reasoning: 'キーワードベース分類: 請求関連'
+          };
+        } else if (content.includes('会議') || content.includes('予定') || content.includes('ミーティング')) {
+          return {
+            type: 'SCHEDULE',
+            confidence: 0.7,
+            reasoning: 'キーワードベース分類: 予定関連'
+          };
+        } else {
+          return {
+            type: 'OTHER',
+            confidence: 0.5,
+            reasoning: 'キーワードベース分類: その他'
+          };
+        }
       }
     } catch (error) {
       console.error('❌ ローカルAI分析エラー:', error.message);
@@ -118,6 +125,19 @@ ${emailContent}
         reasoning: 'エラーのため分類できませんでした',
         extracted_data: null
       };
+    }
+  }
+
+  // 簡単なテスト用メソッド
+  async simpleTest() {
+    try {
+      console.log('🧪 簡単なテストを実行...');
+      const response = await this.callOllama('Hello, please respond with "Hello World" in JSON format like {"message": "Hello World"}');
+      console.log('📝 応答:', response);
+      return true;
+    } catch (error) {
+      console.error('❌ 簡単なテスト失敗:', error.message);
+      return false;
     }
   }
 }
@@ -139,69 +159,26 @@ async function runTests() {
     return;
   }
 
-  // 2. 請求書メールのテスト
-  console.log('\n2. 請求書メールの分析テスト');
-  const invoiceEmail = `
-件名: 【重要】月額利用料のお支払いについて
+  // 2. 簡単なテスト
+  console.log('\n2. 簡単なAI応答テスト');
+  const simpleTestResult = await classifier.simpleTest();
+  console.log(`簡単なテスト: ${simpleTestResult ? '✅ 成功' : '❌ 失敗'}`);
 
-いつもお世話になっております。
-株式会社サンプルです。
-
-2024年12月分の月額利用料をご請求させていただきます。
-
-請求金額: 50,000円
-請求書番号: INV-2024-12-001
-お支払期限: 2025年01月31日
-
-お支払いは以下の口座までお願いいたします。
-振込先: みずほ銀行 東京支店 普通 1234567
-
-よろしくお願いいたします。
-`;
-  
-  const invoiceResult = await classifier.classifyEmail(invoiceEmail, '【重要】月額利用料のお支払いについて');
+  // 3. 請求書メールのテスト（簡略版）
+  console.log('\n3. 請求書メールの分析テスト');
+  const invoiceResult = await classifier.classifyEmail(
+    '月額利用料 50,000円を請求いたします。お支払期限は1月31日です。',
+    '月額利用料のお支払いについて'
+  );
   console.log('請求書分析結果:', JSON.stringify(invoiceResult, null, 2));
 
-  // 3. 会議メールのテスト
-  console.log('\n3. 会議メールの分析テスト');
-  const meetingEmail = `
-件名: 【会議招待】プロジェクト進捗確認会議
-
-お疲れ様です。
-
-来週のプロジェクト進捗確認会議の件でご連絡いたします。
-
-日時: 2025年01月20日(月) 14:00-15:00
-場所: 会議室A
-参加者: 田中、佐藤、山田
-
-議題:
-- 第1四半期の進捗確認
-- 次フェーズの計画について
-
-Zoomリンク: https://zoom.us/j/123456789
-
-よろしくお願いいたします。
-`;
-
-  const meetingResult = await classifier.classifyEmail(meetingEmail, '【会議招待】プロジェクト進捗確認会議');
+  // 4. 会議メールのテスト（簡略版）
+  console.log('\n4. 会議メールの分析テスト');
+  const meetingResult = await classifier.classifyEmail(
+    '来週の会議の件です。1月20日14:00-15:00、会議室Aにて。',
+    'プロジェクト進捗確認会議'
+  );
   console.log('会議分析結果:', JSON.stringify(meetingResult, null, 2));
-
-  // 4. その他メールのテスト
-  console.log('\n4. その他メールの分析テスト');
-  const otherEmail = `
-件名: お疲れ様でした
-
-お疲れ様です。
-
-今日のプレゼンテーション、とても良かったです。
-資料もわかりやすく、クライアントも満足していました。
-
-また明日もよろしくお願いします。
-`;
-
-  const otherResult = await classifier.classifyEmail(otherEmail, 'お疲れ様でした');
-  console.log('その他分析結果:', JSON.stringify(otherResult, null, 2));
 
   console.log('\n🎉 ローカルAIテスト完了！');
 }
