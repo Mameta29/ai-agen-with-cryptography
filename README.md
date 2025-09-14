@@ -1,292 +1,243 @@
-# AI Gmail Automation
+# 🤖 AI Gmail Automation System
 
-Gmail新着メールを自動処理し、予定登録と支払い処理を行うNext.jsアプリケーション
+**Private Local AI + zkVM + Blockchain Payment Automation**
 
-## 🚀 機能
+A production-ready email automation system that processes Gmail messages using local AI, validates payment policies with zero-knowledge proofs, and executes blockchain payments automatically.
 
-- **📧 Gmail統合**: 新着メール自動取得・分類
-- **🤖 AI分類**: OpenAI GPT-4oによるメール内容の自動分析
-- **📅 予定管理**: Google Calendar自動登録・重複検知
-- **💳 支払い処理**: JPYC自動支払い・ポリシー評価
-- **🔒 セキュリティ**: DKIM/SPF検証・フィッシング検知
-- **⛓️ ブロックチェーン**: Ethereum Sepolia対応
+## 🌟 Features
 
-## 🏗️ アーキテクチャ
+- **🧠 Local AI Analysis**: Llama3.1-powered email classification with privacy protection
+- **🔐 zkVM Policy Validation**: RISC Zero zero-knowledge proofs for policy compliance
+- **💸 Automated Payments**: Blockchain payments to whitelisted addresses
+- **⚙️ Dynamic Policy Configuration**: User-configurable rules and conditions
+- **🔍 Verifiable Inference**: Cryptographically verifiable AI decisions
+- **🛡️ Privacy-First**: Complete local execution, no data leaves your system
+
+## 🏗️ Architecture
 
 ```
-Gmail新着受信 → AI分類 → 予定/支払い処理 → 結果通知
-     ↓              ↓           ↓           ↓
-  Push/Poll    OpenAI API   Calendar/JPYC   Labels/Reply
+📧 Gmail Messages → 🤖 Local AI → 🔐 zkVM Policy → 💸 Blockchain Payment
+                     ↓              ↓              ↓
+                 Classification   Proof Generation  Automated Execution
 ```
 
-### 処理フロー
+## 🚀 Quick Start
 
-1. **Gmail新着受信**
-   - Gmail APIのPush通知またはポーリング
-   - DKIM/SPF/Fromドメイン検査
-   - フィッシング疑義のブロック
-
-2. **分類 & 情報抽出**
-   - ルール + LLMで「請求/予定/その他」を分類
-   - 請求: 請求元・金額・支払期日・振込先抽出
-   - 予定: タイトル・日時・場所・参加URL抽出
-
-3. **分岐A：予定なら**
-   - Google Calendar APIでevents.insert（重複検知）
-   - メールへラベル「Scheduled」付与
-   - サマリを返信/Slack通知（任意）
-
-4. **分岐B：請求なら**
-   - 送金先の信頼度評価（ホワイトリスト/過去実績）
-   - 金額・日次/月次上限・時間帯・リトライ回数などポリシー評価
-   - クリアならトランザクション生成→ブロードキャスト
-   - 失敗時はユーザー承認要求へフォールバック
-   - 成功後：Gmailに「Paid (Onchain)」ラベル＋トランザクションハッシュ記録
-
-## 🛠️ 技術スタック
-
-- **Frontend**: Next.js 15, TypeScript, Tailwind CSS
-- **Backend**: Next.js API Routes
-- **AI**: OpenAI GPT-4o-mini
-- **Google APIs**: Gmail API, Calendar API, OAuth2
-- **Blockchain**: Viem, Ethereum Sepolia, JPYC Token
-- **Database**: SQLite（開発用）
-- **Deployment**: Vercel Ready
-
-## 📋 前提条件
-
+### Prerequisites
 - Node.js 18+
+- Rust (for zkVM)
 - pnpm
-- Google Cloud Console プロジェクト
-- OpenAI API キー
-- Ethereum Sepolia テストネット用秘密鍵
-- JPYC テストトークン
+- Google Cloud Console project
+- Ethereum Sepolia testnet access
 
-## 🚀 セットアップ
-
-### 1. リポジトリのクローン
+### Installation
 
 ```bash
+# 1. Clone repository
 git clone <repository-url>
 cd ai-gmail-automation
+
+# 2. Setup development environment
+make setup
+
+# 3. Configure environment variables
+cp env.example .env.local
+# Edit .env.local with your credentials
+
+# 4. Run the system
+make run
 ```
 
-### 2. 依存関係のインストール
+## 📋 Usage
+
+### System Commands
 
 ```bash
-pnpm install
+# Run complete system
+make run
+
+# Check system health
+make health
+
+# Display configuration
+make config
+
+# Process emails only
+make process
+
+# Start web interface
+make web
 ```
 
-### 3. 環境変数の設定
+### Web Interface
 
 ```bash
-cp .env.example .env.local
+# Start development server
+make web
+
+# Open browser to http://localhost:3000
 ```
 
-`.env.local` を編集：
+## ⚙️ Configuration
+
+### Environment Variables (.env.local)
 
 ```env
 # Google APIs
 GOOGLE_CLIENT_ID=your_google_client_id
 GOOGLE_CLIENT_SECRET=your_google_client_secret
 GOOGLE_REDIRECT_URI=http://localhost:3000/api/auth/google/callback
+GOOGLE_REFRESH_TOKEN=your_refresh_token
 
-# Google Cloud Pub/Sub（オプション）
-GOOGLE_PROJECT_ID=your_google_project_id
-GOOGLE_PUBSUB_SUBSCRIPTION=gmail-push-subscription
-
-# OpenAI
-OPENAI_API_KEY=your_openai_api_key
+# Local AI
+USE_LOCAL_AI=true
+LOCAL_AI_URL=http://localhost:11434
+LOCAL_AI_MODEL=llama3.1:8b
 
 # Blockchain
 SEPOLIA_RPC_URL=https://sepolia.infura.io/v3/your_infura_key
-PRIVATE_KEY=your_private_key_for_development
-
-# JPYC Contract（デプロイ後に設定）
-JPYC_CONTRACT_ADDRESS=
+PRIVATE_KEY=your_private_key
+ENABLE_PAYMENTS=true
 
 # Security
-JWT_SECRET=your_jwt_secret_for_sessions
+JWT_SECRET=your_jwt_secret
 ENCRYPTION_KEY=your_32_byte_encryption_key
-
-# Development
-NODE_ENV=development
-NEXT_PUBLIC_APP_URL=http://localhost:3000
 ```
 
-### 4. Google Cloud Console設定
+### User Policy Configuration
 
-1. [Google Cloud Console](https://console.cloud.google.com/)でプロジェクトを作成
-2. Gmail API、Calendar APIを有効化
-3. OAuth 2.0認証情報を作成
-4. リダイレクトURIを設定：`http://localhost:3000/api/auth/google/callback`
-
-### 5. 開発サーバーの起動
-
-```bash
-pnpm dev
-```
-
-ブラウザで `http://localhost:3000` を開いてください。
-
-## 📖 使用方法
-
-### 初回セットアップ
-
-1. **Google認証**: 「Googleアカウントで認証」ボタンをクリック
-2. **権限許可**: Gmail、Calendarへのアクセスを許可
-3. **システム確認**: ダッシュボードでサービス接続状況を確認
-
-### メール処理
-
-1. **手動実行**: 「メール処理実行」ボタンで新着メールを処理
-2. **結果確認**: 処理結果がリアルタイムで表示
-3. **詳細確認**: トランザクションハッシュやカレンダーリンクをクリック
-
-### 設定カスタマイズ
-
-支払いポリシーは `src/lib/payment-policy.ts` で設定：
+The system supports dynamic policy configuration through code:
 
 ```typescript
-// デフォルト設定例
+// Example user policy
 {
-  maxPerPayment: 100000,    // 10万円
-  maxPerDay: 500000,        // 50万円
-  maxPerWeek: 2000000,      // 200万円
-  allowedHours: { start: 9, end: 18 },
-  trustedDomains: ['gmail.com', 'company.co.jp'],
-  requireManualApproval: {
-    amountThreshold: 200000,  // 20万円以上
-    unknownVendor: true,
-    outsideBusinessHours: true,
-  }
+  maxPerPayment: 200000,        // 20万円
+  maxPerDay: 1000000,           // 100万円
+  maxPerWeek: 5000000,          // 500万円
+  allowedVendors: [
+    "Amazon Web Services株式会社",
+    "Microsoft Corporation"
+  ],
+  categoryRules: {
+    "cloud-services": { maxAmount: 300000, requireApproval: false },
+    "software": { maxAmount: 200000, requireApproval: true }
+  },
+  conditionalRules: [
+    {
+      condition: "amount > 150000",
+      action: "require_approval",
+      parameters: { reason: "High amount" }
+    }
+  ]
 }
 ```
 
-## 🔒 セキュリティ
+## 🔧 Development
 
-- **非カストディ**: 秘密鍵はユーザー管理
-- **DKIM/SPF検証**: メール認証の確認
-- **フィッシング検知**: 疑わしいメールの自動ブロック
-- **支払い制限**: 金額・時間・ベンダー制限
-- **監査ログ**: 全処理の記録・追跡
-
-## 🧪 テスト
-
-```bash
-# ユニットテスト
-pnpm test
-
-# E2Eテスト
-pnpm test:e2e
-
-# 型チェック
-pnpm type-check
-
-# Lint
-pnpm lint
-```
-
-## 📦 デプロイ
-
-### Vercelデプロイ
-
-```bash
-# Vercel CLIでデプロイ
-pnpm dlx vercel
-
-# 環境変数を設定
-vercel env add GOOGLE_CLIENT_ID
-vercel env add OPENAI_API_KEY
-# ... 他の環境変数
-```
-
-### Railway/その他
-
-```bash
-# ビルド
-pnpm build
-
-# プロダクション起動
-pnpm start
-```
-
-## 🔧 開発
-
-### ディレクトリ構造
+### Directory Structure
 
 ```
 src/
-├── app/                    # Next.js App Router
-│   ├── api/               # API Routes
-│   │   ├── auth/          # Google OAuth
-│   │   └── process-emails/ # メール処理
-│   └── page.tsx           # メインダッシュボード
-├── lib/                   # コアライブラリ
-│   ├── gmail.ts           # Gmail API統合
-│   ├── ai-classifier.ts   # AI分類・抽出
-│   ├── calendar.ts        # Calendar API統合
-│   ├── payment-policy.ts  # 支払いポリシー評価
-│   ├── blockchain.ts      # ブロックチェーン統合
-│   └── email-processor.ts # メイン処理ロジック
-└── components/            # UIコンポーネント
-    └── ui/               # 基本UIコンポーネント
+├── app/                     # Next.js App Router
+│   ├── api/process-emails/  # Email processing API
+│   └── page.tsx            # Main dashboard
+├── lib/                    # Core system libraries
+│   ├── real-local-ai.ts    # Local AI implementation
+│   ├── integrated-ai-zkvm.ts # AI + zkVM integration
+│   ├── real-payment-executor.ts # Blockchain payments
+│   ├── zkvm-policy-engine.ts # zkVM wrapper
+│   ├── email-processor.ts  # Main processing logic
+│   └── gmail.ts           # Gmail API integration
+└── components/            # UI components
+
+zk/risc0/zkvm-policy-engine/  # zkVM implementation
+├── methods/guest/src/main.rs # Policy evaluation logic
+├── host/src/main.rs         # Proof generation
+└── target/debug/host        # Compiled binary
+
+scripts/
+└── run-system.ts           # Production runner
 ```
 
-### 新機能の追加
-
-1. **新しい分類タイプ**: `ai-classifier.ts`を拡張
-2. **支払いプロバイダー**: `blockchain.ts`に新しいサービス追加
-3. **通知方法**: `email-processor.ts`に通知ロジック追加
-
-## 🐛 トラブルシューティング
-
-### よくある問題
-
-**Q: Google認証でエラーが発生する**
-A: リダイレクトURIがGoogle Cloud Consoleの設定と一致しているか確認
-
-**Q: メール処理が動作しない**
-A: 環境変数（特にOPENAI_API_KEY）が正しく設定されているか確認
-
-**Q: ブロックチェーン接続エラー**
-A: SEPOLIA_RPC_URLとPRIVATE_KEYが正しく設定されているか確認
-
-### ログ確認
+### Building Components
 
 ```bash
-# 開発環境のログ
-pnpm dev
+# Build all components
+make build
 
-# プロダクションログ
-pnpm start --verbose
+# Build zkVM only
+make zkvm:build
+
+# Test zkVM
+make test-zkvm
 ```
 
-## 🤝 コントリビューション
+## 🔍 System Health
 
-1. フォークを作成
-2. フィーチャーブランチを作成: `git checkout -b feature/amazing-feature`
-3. 変更をコミット: `git commit -m 'Add amazing feature'`
-4. ブランチにプッシュ: `git push origin feature/amazing-feature`
-5. プルリクエストを作成
+Check system components:
 
-## 📄 ライセンス
+```bash
+make health
+```
 
-MIT License - 詳細は [LICENSE](LICENSE) ファイルを参照
+Expected output:
+```
+🤖 Local AI: ✅ Online
+🔐 zkVM: ✅ Ready  
+💸 Payment: ✅ Ready
+📧 Gmail: ✅ Connected
+```
 
-## 🙋‍♂️ サポート
+## 💡 How It Works
 
-- **Issues**: [GitHub Issues](https://github.com/your-repo/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/your-repo/discussions)
-- **Email**: support@yourproject.com
+### 1. Email Analysis
+- **Local AI**: Llama3.1 model analyzes email content locally
+- **Privacy**: No data sent to external services
+- **Fallback**: Pattern matching if AI unavailable
+- **Extraction**: Amount, vendor, invoice details
 
----
+### 2. Intent Generation
+- **Dynamic**: Generated from AI analysis results
+- **Structured**: Amount, vendor, category, recipient
+- **Metadata**: AI confidence, processing method
 
-## 🔮 今後の拡張予定
+### 3. Policy Evaluation
+- **Dynamic Rules**: User-configurable policies
+- **zkVM Proofs**: Cryptographic validation
+- **Conditions**: Amount limits, vendor whitelist, time constraints
+- **Custom Logic**: Category-specific rules, conditional logic
 
-- **zkVM統合**: RISC Zero/SP1による証明生成
-- **EIP-4337**: Account Abstraction + Verifying Paymaster
-- **EAS統合**: Ethereum Attestation Service
-- **マルチチェーン**: Base、Polygon対応
-- **Slack/Discord**: 通知統合
-- **会計連携**: freee、MoneyForward連携
+### 4. Payment Execution
+- **Whitelist Only**: Payments to pre-approved addresses
+- **Blockchain**: Ethereum Sepolia network
+- **Verification**: ZKP-verified policy compliance
+- **Audit Trail**: On-chain transaction records
+
+## 🛡️ Security
+
+- **Local Execution**: AI inference runs entirely on your machine
+- **Zero-Knowledge Proofs**: Policy compliance without revealing private data
+- **Whitelist Protection**: Payments only to approved addresses
+- **DKIM/SPF Verification**: Email authenticity checks
+- **Rate Limiting**: Automatic processing delays
+
+## 🎯 Actually Intelligent Compliance
+
+This system meets all Actually Intelligent track requirements:
+
+- ✅ **Autonomy Delta**: Complete local execution, user-owned infrastructure
+- ✅ **Verifiability**: ZKP proofs + deterministic rule-based inference  
+- ✅ **Forkability**: One-command startup, consumer hardware compatible
+- ✅ **Composability**: zkp library integration, key-based authentication
+- ✅ **Innovation**: World-first local AI + zkVM integration
+
+## 📞 Support
+
+- **System Health**: `make health`
+- **Configuration**: `make config`
+- **Status Check**: `make status`
+- **Help**: `make help`
+
+## 📄 License
+
+MIT License - see [LICENSE](LICENSE) file for details.

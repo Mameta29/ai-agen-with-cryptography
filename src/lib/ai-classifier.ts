@@ -1,5 +1,6 @@
 import OpenAI from 'openai';
 import { GmailMessage, EmailClassification, InvoiceData, ScheduleData } from './gmail';
+import { LocalAIClassifier } from './local-ai-classifier';
 import fs from 'fs';
 // import * as pdfParse from 'pdf-parse';
 
@@ -7,13 +8,42 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
+export interface AIClassifierConfig {
+  useLocalAI: boolean;
+  fallbackToOpenAI: boolean;
+  localAIConfig?: {
+    apiUrl: string;
+    model: string;
+    timeout: number;
+  };
+}
+
 export class AIClassifier {
   private openai: OpenAI;
+  private localAI: LocalAIClassifier | null = null;
+  private config: AIClassifierConfig;
 
-  constructor() {
+  constructor(config: Partial<AIClassifierConfig> = {}) {
+    this.config = {
+      useLocalAI: process.env.USE_LOCAL_AI === 'true',
+      fallbackToOpenAI: true,
+      localAIConfig: {
+        apiUrl: process.env.LOCAL_AI_URL || 'http://localhost:11434',
+        model: process.env.LOCAL_AI_MODEL || 'llama3.1:8b',
+        timeout: 60000,
+      },
+      ...config
+    };
+
     this.openai = new OpenAI({
       apiKey: process.env.OPENAI_API_KEY,
     });
+
+    // ローカルAIが有効な場合は初期化
+    if (this.config.useLocalAI) {
+      this.localAI = new LocalAIClassifier(this.config.localAIConfig);
+      console.log('🤖 ローカルAIクラシファイアを初期化しました');
+    }
   }
 
   /**
@@ -26,6 +56,8 @@ export class AIClassifier {
     attachments: Array<{ filename: string; mimeType: string; data: Buffer }>
   ): Promise<EmailClassification> {
     try {
+      console.log(`📧 メール分類開始 - ローカルAI: ${this.config.useLocalAI ? '有効' : '無効'}`);
+      
       // まず基本的な分類を実行
       const classification = await this.classifyEmail(subject, body, from);
       
@@ -52,48 +84,94 @@ export class AIClassifier {
   }
 
   /**
-   * メールの基本分類
+   * メール分類（ローカルAI優先、フォールバック対応）
    */
-  private async classifyEmail(
-    subject: string,
-    body: string,
-    from: string
-  ): Promise<{ type: 'invoice' | 'schedule' | 'other'; confidence: number }> {
+  private async classifyEmail(subject: string, body: string, from: string): Promise<EmailClassification> {
+    // ローカルAIを試行
+    if (this.config.useLocalAI && this.localAI) {
+      try {
+        console.log('🤖 ローカルAIで分類を実行中...');
+        const localResult = await this.localAI.classifyEmail(body, subject);
+        
+        // ローカルAIの結果を既存の形式に変換
+        const classification: EmailClassification = {
+          type: localResult.type.toLowerCase() as 'invoice' | 'schedule' | 'other',
+          confidence: localResult.confidence,
+          extractedData: localResult.extracted_data
+        };
+        
+        console.log(`✅ ローカルAI分類完了: ${classification.type} (${classification.confidence})`);
+        
+        // 信頼度が低い場合はフォールバック
+        if (classification.confidence < 0.6 && this.config.fallbackToOpenAI) {
+          console.log('⚠️ ローカルAIの信頼度が低いため、OpenAIにフォールバック');
+          return await this.classifyWithOpenAI(subject, body, from);
+        }
+        
+        return classification;
+      } catch (error) {
+        console.error('❌ ローカルAI分類エラー:', error);
+        
+        if (this.config.fallbackToOpenAI) {
+          console.log('🔄 OpenAIにフォールバック');
+          return await this.classifyWithOpenAI(subject, body, from);
+        } else {
+          throw error;
+        }
+      }
+    }
+
+    // OpenAIを使用
+    return await this.classifyWithOpenAI(subject, body, from);
+  }
+
+  /**
+   * OpenAIによる分類（従来の実装）
+   */
+  private async classifyWithOpenAI(subject: string, body: string, from: string): Promise<EmailClassification> {
+    console.log('🧠 OpenAIで分類を実行中...');
+    
+    const prompt = `
+以下のメールを分析し、分類してください。
+
+件名: ${subject}
+差出人: ${from}
+本文: ${body.substring(0, 1000)}
+
+以下のカテゴリから選択してください：
+1. invoice - 請求書、支払い要求、料金通知
+2. schedule - 会議招待、予定調整、イベント案内
+3. other - その他
+
+回答形式:
+{
+  "type": "invoice|schedule|other",
+  "confidence": 0.0-1.0,
+  "reasoning": "分類理由"
+}
+`;
+
     try {
-      const completion = await this.openai.chat.completions.create({
-        model: "gpt-5-nano",
-        messages: [
-          {
-            role: "system",
-            content: `あなたはメール分類の専門家です。メールを以下の3つのカテゴリに分類してください：
-            
-            1. invoice: 請求書、支払い通知、料金請求など
-            2. schedule: 会議、イベント、予定に関する内容
-            3. other: その他
-            
-            JSONで以下の形式で返してください：
-            {
-              "type": "invoice|schedule|other",
-              "confidence": 0.0-1.0の信頼度,
-              "reasoning": "分類理由"
-            }`
-          },
-          {
-            role: "user",
-            content: `件名: ${subject}\n差出人: ${from}\n本文: ${body.substring(0, 1000)}`
-          }
-        ],
-        temperature: 1
+      const response = await this.openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.1,
       });
 
-      const result = JSON.parse(completion.choices[0].message.content || '{}');
+      const content = response.choices[0]?.message?.content;
+      if (!content) throw new Error('OpenAI応答が空です');
+
+      const result = JSON.parse(content);
+      console.log(`✅ OpenAI分類完了: ${result.type} (${result.confidence})`);
+      
       return {
-        type: result.type || 'other',
-        confidence: result.confidence || 0
+        type: result.type,
+        confidence: result.confidence,
+        extractedData: null
       };
     } catch (error) {
-      console.error('Email classification failed:', error);
-      return { type: 'other', confidence: 0 };
+      console.error('OpenAI分類エラー:', error);
+      throw error;
     }
   }
 
@@ -394,6 +472,65 @@ export class AIClassifier {
       shouldProcess: hasImportantKeyword,
       reason: hasImportantKeyword ? 'Important keywords detected' : 'No relevant keywords found',
     };
+  }
+
+  /**
+   * ローカルAIの接続テスト
+   */
+  async testLocalAI(): Promise<boolean> {
+    if (!this.localAI) {
+      console.log('ローカルAIが初期化されていません');
+      return false;
+    }
+
+    try {
+      console.log('🧪 ローカルAI接続テスト中...');
+      const isConnected = await this.localAI.testConnection();
+      console.log(`ローカルAI接続テスト: ${isConnected ? '✅ 成功' : '❌ 失敗'}`);
+      return isConnected;
+    } catch (error) {
+      console.error('ローカルAI接続テストエラー:', error);
+      return false;
+    }
+  }
+
+  /**
+   * 利用可能なローカルAIモデル一覧を取得
+   */
+  async getAvailableLocalModels(): Promise<string[]> {
+    if (!this.localAI) return [];
+
+    try {
+      return await this.localAI.getAvailableModels();
+    } catch (error) {
+      console.error('ローカルAIモデル一覧取得エラー:', error);
+      return [];
+    }
+  }
+
+  /**
+   * 設定情報を取得
+   */
+  getConfig(): AIClassifierConfig {
+    return { ...this.config };
+  }
+
+  /**
+   * 設定を更新
+   */
+  updateConfig(newConfig: Partial<AIClassifierConfig>): void {
+    this.config = { ...this.config, ...newConfig };
+    
+    // ローカルAI設定が変更された場合は再初期化
+    if (newConfig.useLocalAI !== undefined || newConfig.localAIConfig) {
+      if (this.config.useLocalAI && !this.localAI) {
+        this.localAI = new LocalAIClassifier(this.config.localAIConfig);
+        console.log('🤖 ローカルAIクラシファイアを再初期化しました');
+      } else if (!this.config.useLocalAI && this.localAI) {
+        this.localAI = null;
+        console.log('🚫 ローカルAIクラシファイアを無効化しました');
+      }
+    }
   }
 }
 

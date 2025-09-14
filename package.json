@@ -6,7 +6,13 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "system:run": "node scripts/run-system.js",
+    "system:health": "node scripts/run-system.js health",
+    "system:config": "node scripts/run-system.js config",
+    "system:process": "node scripts/run-system.js process",
+    "zkvm:build": "cd zk/risc0/zkvm-policy-engine && cargo build --release",
+    "zkvm:test": "cd zk/risc0/zkvm-policy-engine && cargo run --bin host"
   },
   "dependencies": {
     "@ethereum-attestation-service/eas-sdk": "2.9.1-beta.1",
@@ -17,6 +23,7 @@
     "cbor-js": "^0.1.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "dotenv": "^17.2.2",
     "ethers": "^6.15.0",
     "google-auth-library": "^10.3.0",
     "googleapis": "^159.0.0",
@@ -44,6 +51,7 @@
     "eslint": "^9",
     "eslint-config-next": "15.5.2",
     "tailwindcss": "^4",
+    "ts-node": "^10.9.2",
     "typescript": "^5"
   }
 }

@@ -7,5 +7,3 @@ edition = "2021"
 
 [dependencies]
 risc0-zkvm = { version = "^3.0.3", default-features = false, features = ['std'] }
-serde = { version = "1.0", default-features = false, features = ["derive", "alloc"] }
-serde_json = { version = "1.0", default-features = false, features = ["alloc"] }

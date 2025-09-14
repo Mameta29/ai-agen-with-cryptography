@@ -2,20 +2,19 @@
 // The ELF is used for proving and the ID is used for verification.
 use methods::{POLICY_VERIFIER_ELF, POLICY_VERIFIER_ID};
 use risc0_zkvm::{default_prover, ExecutorEnv, Receipt};
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 
-// Re-export the types from guest for consistency
-#[derive(Serialize, Deserialize, Clone, Debug)]
+// 簡略化された構造体
+#[derive(Clone, Debug)]
 pub struct PaymentIntent {
     pub amount: u64,
     pub recipient: String,
     pub timestamp: u64,
     pub vendor: String,
-    pub category: String,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct PolicyRules {
     pub max_per_payment: u64,
     pub max_per_day: u64,
@@ -24,25 +23,13 @@ pub struct PolicyRules {
     pub allowed_hours_start: u8,
     pub allowed_hours_end: u8,
     pub allowed_weekdays: Vec<u8>,
-    pub blocked_keywords: Vec<String>,
-    pub custom_rules: HashMap<String, serde_json::Value>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Debug)]
 pub struct PolicyEvaluation {
     pub approved: bool,
-    pub reason: String,
     pub risk_score: u8,
-    pub violations: Vec<String>,
-    pub policy_hash: [u8; 32],
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct ZkVMInput {
-    pub intent: PaymentIntent,
-    pub policy: PolicyRules,
-    pub current_spending: u64,
-    pub weekly_spending: u64,
+    pub violation_count: u8,
 }
 
 pub struct ZkVMPolicyEngine;
@@ -64,16 +51,38 @@ impl ZkVMPolicyEngine {
             .with_env_filter(tracing_subscriber::filter::EnvFilter::from_default_env())
             .init();
 
-        let input = ZkVMInput {
-            intent,
-            policy,
-            current_spending,
-            weekly_spending,
+        // 文字列をハッシュに変換
+        let recipient_hash = self.hash_string(&intent.recipient);
+        let vendor_hash = self.hash_string(&intent.vendor);
+        let allowed_vendor_hash = if !policy.allowed_vendors.is_empty() {
+            self.hash_string(&policy.allowed_vendors[0])
+        } else {
+            0
         };
 
-        // Create executor environment with our input
+        // 曜日をビットマスクに変換
+        let mut weekday_mask = 0u8;
+        for &day in &policy.allowed_weekdays {
+            if day < 8 {
+                weekday_mask |= 1u8 << day;
+            }
+        }
+
+        // Create executor environment with individual inputs
         let env = ExecutorEnv::builder()
-            .write(&input)?
+            .write(&intent.amount)?
+            .write(&recipient_hash)?
+            .write(&intent.timestamp)?
+            .write(&vendor_hash)?
+            .write(&policy.max_per_payment)?
+            .write(&policy.max_per_day)?
+            .write(&policy.max_per_week)?
+            .write(&allowed_vendor_hash)?
+            .write(&policy.allowed_hours_start)?
+            .write(&policy.allowed_hours_end)?
+            .write(&weekday_mask)?
+            .write(&current_spending)?
+            .write(&weekly_spending)?
             .build()?;
 
         // Get the default prover
@@ -89,8 +98,16 @@ impl ZkVMPolicyEngine {
         let duration = start_time.elapsed();
         println!("✅ ZK proof generated in {:?}", duration);
 
-        // Decode the output
-        let evaluation: PolicyEvaluation = receipt.journal.decode()?;
+        // Decode the outputs (3 separate values)
+        let approved: u8 = receipt.journal.decode()?;
+        let risk_score: u8 = receipt.journal.decode()?;
+        let violation_count: u8 = receipt.journal.decode()?;
+
+        let evaluation = PolicyEvaluation {
+            approved: approved != 0,
+            risk_score,
+            violation_count,
+        };
 
         // Verify the receipt
         receipt.verify(POLICY_VERIFIER_ID)?;
@@ -103,9 +120,25 @@ impl ZkVMPolicyEngine {
         // Verify the receipt
         receipt.verify(POLICY_VERIFIER_ID)?;
         
-        // Decode and return the evaluation
-        let evaluation: PolicyEvaluation = receipt.journal.decode()?;
+        // Decode the outputs
+        let approved: u8 = receipt.journal.decode()?;
+        let risk_score: u8 = receipt.journal.decode()?;
+        let violation_count: u8 = receipt.journal.decode()?;
+
+        let evaluation = PolicyEvaluation {
+            approved: approved != 0,
+            risk_score,
+            violation_count,
+        };
+
         Ok(evaluation)
+    }
+
+    // 文字列をu64ハッシュに変換
+    fn hash_string(&self, s: &str) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        s.hash(&mut hasher);
+        hasher.finish()
     }
 }
 
@@ -119,13 +152,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         recipient: "0x1234567890123456789012345678901234567890".to_string(),
         timestamp: 1704067200, // 2024-01-01 00:00:00 UTC
         vendor: "Sample Vendor Corp".to_string(),
-        category: "utilities".to_string(),
     };
 
     // Create a sample policy
-    let mut custom_rules = HashMap::new();
-    custom_rules.insert("utilities".to_string(), serde_json::Value::Number(serde_json::Number::from(100000)));
-
     let policy = PolicyRules {
         max_per_payment: 100000,
         max_per_day: 300000,
@@ -137,8 +166,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         allowed_hours_start: 9,
         allowed_hours_end: 18,
         allowed_weekdays: vec![1, 2, 3, 4, 5], // Monday to Friday
-        blocked_keywords: vec!["suspicious".to_string(), "scam".to_string()],
-        custom_rules,
     };
 
     // Generate proof
@@ -151,26 +178,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("\n📊 Policy Evaluation Result:");
     println!("✅ Approved: {}", evaluation.approved);
-    println!("📝 Reason: {}", evaluation.reason);
     println!("⚠️  Risk Score: {}/100", evaluation.risk_score);
-    println!("🔒 Policy Hash: {:?}", hex::encode(evaluation.policy_hash));
-
-    if !evaluation.violations.is_empty() {
-        println!("❌ Violations:");
-        for violation in &evaluation.violations {
-            println!("   - {}", violation);
-        }
-    }
+    println!("❌ Violations: {}", evaluation.violation_count);
 
     Ok(())
-}
-
-// Helper function to convert bytes to hex string
-mod hex {
-    pub fn encode(bytes: [u8; 32]) -> String {
-        bytes.iter()
-            .map(|b| format!("{:02x}", b))
-            .collect::<Vec<String>>()
-            .join("")
-    }
 }

@@ -1,14 +1,10 @@
 import { GmailService, GmailMessage, InvoiceData, ScheduleData } from './gmail';
-import { AIClassifier } from './ai-classifier';
 import { CalendarService } from './calendar';
-import { PaymentPolicyEvaluator, PaymentPolicy, PolicyEvaluationResult } from './payment-policy';
-import { BlockchainService } from './blockchain';
-import { ZKPProver, PaymentPlan, UserRules, ZKPProof, SchedulePlan, ScheduleRules } from './zkp-prover';
-import { ZKPVerifier } from './zkp-verifier';
-import { PaymentPlanner, RiskAssessment } from './payment-planner';
-// import { EASService, PaymentAttestation, ScheduleAttestation } from './eas-service-simple';
+import { RealLocalAI, RealAIAnalysis } from './real-local-ai';
+import { IntegratedAIZkVMSystem, DynamicPolicy, PaymentIntent, ZkVMEvaluation } from './integrated-ai-zkvm';
+import { RealPaymentExecutor, PaymentRequest, PaymentResult } from './real-payment-executor';
+import { ZkVMPolicyEngine } from './zkvm-policy-engine';
 import { OAuth2Client } from 'google-auth-library';
-import { Address } from 'viem';
 
 export interface ProcessingResult {
   messageId: string;
@@ -16,23 +12,23 @@ export interface ProcessingResult {
   success: boolean;
   action: string;
   details?: {
+    // AI Analysis
+    aiAnalysis?: RealAIAnalysis;
+    
     // Schedule processing
     calendarEventId?: string;
     calendarEventUrl?: string;
     
-    // Invoice processing with ZKP
-    policyEvaluation?: PolicyEvaluationResult;
-    paymentPlan?: PaymentPlan;
-    zkpProof?: ZKPProof;
-    zkpVerified?: boolean;
-    transactionHash?: string;
-    paymentAmount?: number;
-    riskAssessment?: RiskAssessment;
-    // easAttestationUID?: string;
+    // Invoice processing with integrated system
+    paymentIntent?: PaymentIntent;
+    dynamicPolicy?: DynamicPolicy;
+    zkVMEvaluation?: ZkVMEvaluation;
+    paymentResult?: PaymentResult;
     
     // Common
     error?: string;
     warnings?: string[];
+    processingTime?: number;
   };
 }
 
@@ -45,34 +41,53 @@ export interface ProcessingConfig {
     refreshToken: string;
   };
   
-  // OpenAI
-  openaiApiKey: string;
-  
-  // Blockchain
-  blockchain: {
-    privateKey: string;
-    rpcUrl: string;
-    jpycTokenAddress: Address;
+  // Local AI configuration
+  localAI: {
+    enabled: boolean;
+    apiUrl: string;
+    model: string;
+    fallbackToPatternMatching: boolean;
   };
   
-  // Payment policy
-  paymentPolicy: PaymentPolicy;
+  // zkVM configuration
+  zkVM: {
+    enabled: boolean;
+    hostBinaryPath: string;
+    timeout: number;
+  };
   
-  // User rules for ZKP
-  userRules: UserRules;
-  scheduleRules: ScheduleRules;
+  // Payment configuration
+  payment: {
+    enabled: boolean;
+    network: string;
+    whitelistedAddresses: string[];
+    maxAmount: number;
+  };
+  
+  // User policy settings
+  userPolicy: {
+    maxPerPayment: number;
+    maxPerDay: number;
+    maxPerWeek: number;
+    allowedVendors: string[];
+    allowedHours: { start: number; end: number };
+    allowedWeekdays: number[];
+    categoryRules: Record<string, { maxAmount: number; requireApproval: boolean }>;
+    conditionalRules: Array<{
+      condition: string;
+      action: 'approve' | 'reject' | 'require_approval';
+      parameters?: Record<string, any>;
+    }>;
+    minAIConfidence: number;
+  };
 }
 
 export class EmailProcessor {
   private gmailService: GmailService;
-  private aiClassifier: AIClassifier;
   private calendarService: CalendarService;
-  private policyEvaluator: PaymentPolicyEvaluator;
-  private blockchainService: BlockchainService;
-  private zkpProver: ZKPProver;
-  private zkpVerifier: ZKPVerifier;
-  private paymentPlanner: PaymentPlanner;
-  // private easService: EASService;
+  private localAI: RealLocalAI;
+  private integratedSystem: IntegratedAIZkVMSystem;
+  private paymentExecutor: RealPaymentExecutor;
   private config: ProcessingConfig;
 
   constructor(config: ProcessingConfig) {
@@ -80,54 +95,34 @@ export class EmailProcessor {
     
     // Initialize services
     this.gmailService = new GmailService(config.gmailCredentials);
-    this.aiClassifier = new AIClassifier();
+    this.calendarService = new CalendarService();
     
-    // CalendarServiceはGmailServiceと同じOAuth2Clientを共有
-    const oauth2Client = new OAuth2Client(
-      config.gmailCredentials.clientId,
-      config.gmailCredentials.clientSecret,
-      config.gmailCredentials.redirectUri
-    );
+    // Initialize integrated AI system
+    if (config.localAI.enabled) {
+      this.localAI = new RealLocalAI();
+    }
     
-    if (config.gmailCredentials.refreshToken) {
-    oauth2Client.setCredentials({
-      refresh_token: config.gmailCredentials.refreshToken,
-    });
+    // Initialize integrated zkVM system
+    this.integratedSystem = new IntegratedAIZkVMSystem();
+    
+    // Initialize payment system
+    if (config.payment.enabled) {
+      this.paymentExecutor = new RealPaymentExecutor();
     }
 
-    this.calendarService = new CalendarService(oauth2Client);
-    this.policyEvaluator = new PaymentPolicyEvaluator(config.paymentPolicy);
-    this.blockchainService = new BlockchainService(
-      config.blockchain.privateKey,
-      config.blockchain.rpcUrl
-    );
-    
-    // Initialize ZKP components
-    this.zkpProver = new ZKPProver();
-    this.zkpVerifier = new ZKPVerifier();
-    this.paymentPlanner = new PaymentPlanner(config.openaiApiKey);
-    
-    // Initialize EAS service (コメントアウト)
-    // this.easService = new EASService(
-    //   process.env.EAS_CONTRACT_ADDRESS || '0xC2679fBD37d54388Ce493F1DB75320D236e1815e',
-    //   config.blockchain.rpcUrl,
-    //   config.blockchain.privateKey
-    // );
-    
-    console.log('EmailProcessor initialized with ZKP support');
+    console.log('📧 Email Processor initialized with integrated AI + zkVM + Payment system');
   }
 
   /**
-   * 新着メールを処理（ZKP統合版）
+   * 新着メールを処理（統合システム使用）
    */
   async processNewEmails(): Promise<ProcessingResult[]> {
     try {
-      console.log('🚀 新着メール処理を開始（ZKP統合版）');
-      
-      // 新着メールを取得
+      console.log('📨 Processing new emails with integrated system...');
+
       const messages = await this.gmailService.getNewMessages();
-      console.log(`📧 ${messages.length}件の新着メールを取得`);
-      
+      console.log(`📬 Found ${messages.length} new messages`);
+
       const results: ProcessingResult[] = [];
       
       for (const message of messages) {
@@ -135,8 +130,10 @@ export class EmailProcessor {
           const result = await this.processMessage(message);
           results.push(result);
           
+          // Add processing delay to avoid rate limits
+          await new Promise(resolve => setTimeout(resolve, 1000));
         } catch (error) {
-          console.error(`メッセージ ${message.id} の処理でエラー:`, error);
+          console.error(`❌ Error processing message ${message.id}:`, error);
           results.push({
             messageId: message.id,
             type: 'other',
@@ -148,65 +145,54 @@ export class EmailProcessor {
           });
         }
       }
-      
-      console.log('='.repeat(80));
-      console.log(`✅ ${results.length}件のメール処理完了`);
-      console.log('='.repeat(80));
+
+      console.log(`✅ Processed ${results.length} messages`);
       return results;
-      
+
     } catch (error) {
-      console.error('メール処理でエラー:', error);
+      console.error('❌ Failed to process emails:', error);
       throw error;
     }
   }
 
   /**
-   * 個別メッセージの処理（ZKP統合版）
+   * 個別メッセージの処理（統合システム）
    */
   private async processMessage(message: GmailMessage): Promise<ProcessingResult> {
-    console.log('='.repeat(80));
-    console.log(`📨 メッセージ処理開始: ${message.id}`);
-    console.log('='.repeat(80));
+    const startTime = Date.now();
+    console.log(`📨 Processing message: ${message.id}`);
     
     // メール内容を抽出
     const { subject, body, from, attachments } = this.extractMessageContent(message);
 
-    // セキュリティチェック（ZKPテスト用に一時的に無効化）
+    // セキュリティチェック
     const securityCheck = await this.gmailService.performSecurityCheck(message);
-    console.log('🛡️ セキュリティチェック結果 (リスクスコア:', securityCheck.riskScore, ', フィッシング疑い:', securityCheck.phishingSuspected, ')');
-    
-    // ZKPテスト用に一時的にセキュリティチェックを無効化
-    // if (securityCheck.phishingSuspected || securityCheck.riskScore > 0.95) {
-    //   console.warn('⚠️ セキュリティリスクが検出されました');
-    //   return {
-    //     messageId: message.id,
-    //     type: 'other',
-    //     success: false,
-    //     action: 'blocked_security',
-    //     details: {
-    //       warnings: ['セキュリティリスクのため処理をブロックしました']
-    //     }
-    //   };
-    // }
-    
-    console.log('🛡️ セキュリティチェック通過（テスト用に無効化中）');
+    if (securityCheck.phishingSuspected || securityCheck.riskScore > 0.95) {
+      console.warn('⚠️ Security risk detected, blocking message');
+      return {
+        messageId: message.id,
+        type: 'other',
+        success: false,
+        action: 'blocked_security',
+        details: {
+          warnings: ['Security risk detected']
+        }
+      };
+    }
 
-    // AI分類・抽出（GPT-5-nano使用）
-    console.log('🤖 AI分類を実行（GPT-5-nano）');
-    const classification = await this.aiClassifier.classifyAndExtract(
-      subject, body, from, attachments
-    );
-
-    console.log(`📊 分類結果: ${classification.type} (信頼度: ${classification.confidence})`);
-    console.log('-'.repeat(60));
+    // AI分析（ローカルAI使用）
+    console.log('🤖 Analyzing with local AI...');
+    const aiAnalysis = await this.localAI.analyzeEmail(body, subject);
+    
+    console.log(`📊 Classification: ${aiAnalysis.type} (confidence: ${aiAnalysis.confidence})`);
 
     // 分類に応じた処理
-    switch (classification.type) {
-      case 'invoice':
-        return await this.processInvoiceWithZKP(message, classification.extractedData as InvoiceData);
+    switch (aiAnalysis.type) {
+      case 'INVOICE':
+        return await this.processInvoice(message, aiAnalysis, body, startTime);
       
-      case 'schedule':
-        return await this.processScheduleWithZKP(message, classification.extractedData as ScheduleData);
+      case 'SCHEDULE':
+        return await this.processSchedule(message, aiAnalysis, body, startTime);
       
       default:
         return {
@@ -214,347 +200,209 @@ export class EmailProcessor {
           type: 'other',
           success: true,
           action: 'classified_other',
-          details: {}
+          details: {
+            aiAnalysis,
+            processingTime: Date.now() - startTime,
+          }
         };
     }
   }
 
   /**
-   * 請求書処理（ZKP統合版）
+   * 請求書処理（統合システム）
    */
-  private async processInvoiceWithZKP(
-    message: GmailMessage,
-    invoiceData: InvoiceData
+  private async processInvoice(
+    message: GmailMessage, 
+    aiAnalysis: RealAIAnalysis, 
+    emailContent: string,
+    startTime: number
   ): Promise<ProcessingResult> {
-    console.log('💳 請求書処理開始（ZKP統合版）');
-    
     try {
-      // 1. AI支払い計画の生成
-      console.log('🧠 AI支払い計画を生成');
-      const paymentPlan = await this.paymentPlanner.createPaymentPlan(
-        invoiceData, 
-        this.config.userRules
-      );
-      
-      console.log('📋 支払い計画:', paymentPlan);
-      
-      // 2. ZKP証明の生成
-      console.log('🔐 ZKP証明を生成');
-      console.log('-'.repeat(40));
-      const zkpProof = await this.zkpProver.generatePaymentProof(
-        paymentPlan, 
-        this.config.userRules
-      );
-      
-      console.log('🔍 ZKP証明結果:', {
-        isValid: zkpProof.isValid,
-        proofType: zkpProof.proof.mock ? 'mock' : zkpProof.proof.error ? 'error' : 'zkp'
-      });
-      
-      // 3. ZKP証明の検証
-      console.log('✅ ZKP証明を検証');
-      console.log('-'.repeat(40));
-      const zkpVerified = await this.zkpVerifier.verifyProof(zkpProof);
-      
-      if (!zkpVerified) {
-        console.warn('❌ ZKP検証に失敗しました');
-        await this.gmailService.addLabel(message.id, 'ZKP_VERIFICATION_FAILED');
-        
-      return {
-        messageId: message.id,
-          type: 'invoice',
-        success: false,
-          action: 'zkp_verification_failed',
-        details: {
-            paymentPlan,
-            zkpProof,
-            zkpVerified: false,
-            error: 'ZKP証明の検証に失敗しました'
-          }
-      };
-    }
+      console.log('💳 Processing invoice with integrated system...');
 
-      console.log('✅ ZKP検証成功 - 支払いを実行');
-      console.log('-'.repeat(40));
-      
-      // 4. ブロックチェーン支払いの実行
-      // 送金先アドレスはメールから抽出された支払い先アドレスを使用
-      const recipientAddress = invoiceData.paymentAddress || paymentPlan.toAddress;
-      console.log('💰 支払い実行:', {
-        recipient: recipientAddress,
-        amount: invoiceData.amount,
-        jpycToken: this.config.blockchain.jpycTokenAddress
-      });
-      
-      const transactionResult = await this.blockchainService.executePayment(
-        invoiceData,
-        this.config.blockchain.jpycTokenAddress,
-        recipientAddress as Address
-      );
-      
-      if (transactionResult.success) {
-        // 成功時の処理
-        await this.gmailService.addLabel(message.id, 'ZKP_VERIFIED_PAID');
-        await this.gmailService.addLabel(message.id, 'PAID_ONCHAIN');
-        
-        console.log('🎉 ZKP検証済み支払い完了:', transactionResult.txHash);
-        console.log('='.repeat(80));
+      // Step 1: AIの結果からPaymentIntentを生成
+      const paymentIntent = this.integratedSystem.generateIntentFromAI({
+        type: aiAnalysis.type,
+        confidence: aiAnalysis.confidence,
+        extractedData: aiAnalysis.extractedData,
+        reasoning: aiAnalysis.reasoning,
+      }, emailContent);
 
-        return {
-          messageId: message.id,
-          type: 'invoice',
-          success: true,
-          action: 'zkp_verified_payment_executed',
-          details: {
-            paymentPlan,
-            zkpProof,
-            zkpVerified: true,
-                       transactionHash: transactionResult.txHash,
-           paymentAmount: paymentPlan.amount,
-           riskAssessment: paymentPlan.riskAssessment
-           // easAttestationUID: await this.recordPaymentAttestation(paymentPlan, zkpProof, transactionResult.txHash!)
-          }
-        };
-      } else {
-        // 失敗時の処理
-        await this.gmailService.addLabel(message.id, 'ZKP_VERIFIED_PAYMENT_FAILED');
-        
+      if (!paymentIntent) {
         return {
           messageId: message.id,
           type: 'invoice',
           success: false,
-          action: 'payment_execution_failed',
+          action: 'intent_generation_failed',
           details: {
-            paymentPlan,
-            zkpProof,
-            zkpVerified: true,
-            error: transactionResult.error,
-            riskAssessment: paymentPlan.riskAssessment
+            aiAnalysis,
+            error: 'Could not generate payment intent from AI analysis',
+            processingTime: Date.now() - startTime,
           }
         };
       }
+
+      // Step 2: 動的ポリシーを作成
+      const dynamicPolicy = this.createUserPolicy();
+
+      // Step 3: zkVMで統合評価
+      const zkVMEvaluation = await this.integratedSystem.evaluateWithZkVM(
+        paymentIntent,
+        dynamicPolicy
+      );
+
+      console.log(`📊 Policy evaluation: ${zkVMEvaluation.approved ? 'APPROVED' : 'REJECTED'}`);
+
+      // Step 4: 承認された場合の送金実行
+      let paymentResult: PaymentResult | undefined;
       
+      if (zkVMEvaluation.approved && this.config.payment.enabled) {
+        console.log('💸 Executing payment...');
+        
+        const paymentRequest: PaymentRequest = {
+          to: paymentIntent.recipient,
+          amount: paymentIntent.amount,
+          reason: `Automated payment: ${paymentIntent.aiExtracted.invoiceNumber}`,
+          intentHash: this.generateHash(paymentIntent),
+          policyHash: this.generateHash(dynamicPolicy),
+          zkpProof: zkVMEvaluation.zkpReceipt,
+        };
+
+        paymentResult = await this.paymentExecutor.executePayment(paymentRequest);
+        
+        if (paymentResult.success) {
+          console.log(`✅ Payment executed: ${paymentResult.transactionHash}`);
+          
+          // Add Gmail label
+          await this.gmailService.addLabel(message.id, 'Paid (Automated)');
+        }
+      } else {
+        console.log('❌ Payment not approved or payment system disabled');
+      }
+
+      return {
+        messageId: message.id,
+        type: 'invoice',
+        success: true,
+        action: zkVMEvaluation.approved ? 'payment_executed' : 'payment_rejected',
+        details: {
+          aiAnalysis,
+          paymentIntent,
+          dynamicPolicy,
+          zkVMEvaluation,
+          paymentResult,
+          processingTime: Date.now() - startTime,
+        }
+      };
+
     } catch (error) {
-      console.error('請求書処理エラー:', error);
-      await this.gmailService.addLabel(message.id, 'PROCESSING_ERROR');
-      
+      console.error('❌ Invoice processing error:', error);
       return {
         messageId: message.id,
         type: 'invoice',
         success: false,
         action: 'processing_error',
         details: {
-          error: error instanceof Error ? error.message : 'Unknown error'
+          aiAnalysis,
+          error: error instanceof Error ? error.message : 'Unknown error',
+          processingTime: Date.now() - startTime,
         }
       };
     }
   }
 
   /**
-   * 予定処理（ZKP統合版）
+   * スケジュール処理
    */
-  private async processScheduleWithZKP(
+  private async processSchedule(
     message: GmailMessage,
-    scheduleData: ScheduleData
+    aiAnalysis: RealAIAnalysis,
+    emailContent: string,
+    startTime: number
   ): Promise<ProcessingResult> {
-    console.log('📅 予定処理開始（ZKP統合版）');
-    
     try {
-      // 1. スケジュール計画の生成
-      // スケジュールデータの検証
-      if (!scheduleData || !scheduleData.title) {
-        throw new Error('スケジュールデータが不完全です');
+      console.log('📅 Processing schedule...');
+
+      if (!aiAnalysis.extractedData.title || !aiAnalysis.extractedData.startDate) {
+        throw new Error('Insufficient schedule data extracted');
       }
 
-      const schedulePlan: SchedulePlan = {
-        title: scheduleData.title,
-        startTime: Math.floor(new Date(scheduleData.startDate).getTime() / 1000),
-        endTime: Math.floor(new Date(scheduleData.endDate || scheduleData.startDate).getTime() / 1000),
-        location: scheduleData.location || '',
-        description: scheduleData.description,
-        confidence: 1.0,
-        recommendedAction: 'execute'
+      // Calendar event creation
+      const eventData = {
+        summary: aiAnalysis.extractedData.title,
+        start: { dateTime: aiAnalysis.extractedData.startDate },
+        end: { dateTime: aiAnalysis.extractedData.endDate || aiAnalysis.extractedData.startDate },
+        location: aiAnalysis.extractedData.location,
       };
 
-      console.log('📋 スケジュール計画:', schedulePlan);
-
-      // 2. ZKP証明の生成
-      console.log('🔐 スケジュールZKP証明を生成');
-      console.log('-'.repeat(40));
-      const zkpProof = await this.zkpProver.generateScheduleProof(
-        schedulePlan, 
-        this.config.scheduleRules
-      );
-
-      console.log('🔍 スケジュールZKP証明結果:', {
-        isValid: zkpProof.isValid,
-        proofType: zkpProof.proof.mock ? 'mock' : zkpProof.proof.error ? 'error' : 'zkp'
-      });
-
-      // 3. ZKP証明の検証
-      console.log('✅ スケジュールZKP証明を検証');
-      const zkpVerified = await this.zkpVerifier.verifyProof(zkpProof);
-
-      if (!zkpVerified) {
-        console.warn('❌ スケジュールZKP検証に失敗しました');
-        await this.gmailService.addLabel(message.id, 'SCHEDULE_ZKP_VERIFICATION_FAILED');
-        
-        return {
-          messageId: message.id,
-          type: 'schedule',
-          success: false,
-          action: 'schedule_zkp_verification_failed',
-          details: {
-            error: 'スケジュールZKP証明の検証に失敗しました'
-          }
-        };
-      }
-
-      console.log('✅ スケジュールZKP検証成功 - カレンダー登録を実行');
-
-      // 4. カレンダーイベントを作成
-      const eventResult = await this.calendarService.createEvent({
-        title: scheduleData.title,
-        startDate: scheduleData.startDate,
-        endDate: scheduleData.endDate || scheduleData.startDate,
-        location: scheduleData.location,
-        description: scheduleData.description
-      });
+      const eventId = await this.calendarService.createEvent(eventData);
       
-      if (eventResult.success) {
-        await this.gmailService.addLabel(message.id, 'ZKP_VERIFIED_SCHEDULE');
-        await this.gmailService.addLabel(message.id, 'SCHEDULED');
+      // Add Gmail label
+      await this.gmailService.addLabel(message.id, 'Scheduled');
 
-        console.log('🎉 ZKP検証済みスケジュール登録完了');
-        
-        return {
-          messageId: message.id,
-          type: 'schedule',
-          success: true,
-          action: 'zkp_verified_schedule_created',
-          details: {
-            calendarEventId: eventResult.eventId,
-            calendarEventUrl: eventResult.webLink
-            // easAttestationUID: await this.recordScheduleAttestation(schedulePlan, zkpProof, eventResult.eventId!)
-          }
-        };
-      } else {
-        await this.gmailService.addLabel(message.id, 'ZKP_VERIFIED_SCHEDULE_FAILED');
-        
-        return {
-          messageId: message.id,
-          type: 'schedule',
-          success: false,
-          action: 'schedule_creation_failed',
-          details: {
-            error: eventResult.error
-          }
-        };
-      }
-      
+      console.log(`✅ Calendar event created: ${eventId}`);
+
+      return {
+        messageId: message.id,
+        type: 'schedule',
+        success: true,
+        action: 'calendar_event_created',
+        details: {
+          aiAnalysis,
+          calendarEventId: eventId,
+          processingTime: Date.now() - startTime,
+        }
+      };
+
     } catch (error) {
-      console.error('スケジュール処理エラー:', error);
-      await this.gmailService.addLabel(message.id, 'SCHEDULE_PROCESSING_ERROR');
-      
+      console.error('❌ Schedule processing error:', error);
       return {
         messageId: message.id,
         type: 'schedule',
         success: false,
-        action: 'schedule_processing_error',
+        action: 'processing_error',
         details: {
-          error: error instanceof Error ? error.message : 'Unknown error'
+          aiAnalysis,
+          error: error instanceof Error ? error.message : 'Unknown error',
+          processingTime: Date.now() - startTime,
         }
       };
     }
   }
 
-  // /**
-  //  * 支払いアテステーションをEASに記録
-  //  */
-  // private async recordPaymentAttestation(
-  //   paymentPlan: PaymentPlan, 
-  //   zkpProof: ZKPProof, 
-  //   transactionHash: string
-  // ): Promise<string> {
-  //   try {
-  //     const paymentAttestation: PaymentAttestation = {
-  //       invoiceNumber: paymentPlan.invoiceNumber,
-  //       paymentAmount: paymentPlan.amount,
-  //       recipientAddress: paymentPlan.toAddress,
-  //       zkpProofHash: this.easService.generateProofHash(zkpProof),
-  //       timestamp: paymentPlan.timestamp,
-  //       isVerified: zkpProof.isValid
-  //     };
-
-  //     const result = await this.easService.attestPayment(paymentAttestation, zkpProof);
-      
-  //     if (result.success) {
-  //       console.log('📝 支払いアテステーション記録完了:', result.attestationUID);
-  //       return result.attestationUID!;
-  //     } else {
-  //       console.error('❌ 支払いアテステーション記録失敗:', result.error);
-  //       return 'attestation_failed';
-  //     }
-  //   } catch (error) {
-  //     console.error('支払いアテステーション記録エラー:', error);
-  //     return 'attestation_error';
-  //   }
-  // }
-
-  // /**
-  //  * スケジュールアテステーションをEASに記録
-  //  */
-  // private async recordScheduleAttestation(
-  //   schedulePlan: SchedulePlan, 
-  //   zkpProof: ZKPProof, 
-  //   eventId: string
-  // ): Promise<string> {
-  //   try {
-  //     const scheduleAttestation: ScheduleAttestation = {
-  //       eventTitle: schedulePlan.title,
-  //       startTime: schedulePlan.startTime,
-  //       endTime: schedulePlan.endTime,
-  //       zkpProofHash: this.easService.generateProofHash(zkpProof),
-  //       timestamp: Math.floor(Date.now() / 1000),
-  //       isVerified: zkpProof.isValid
-  //     };
-
-  //     const result = await this.easService.attestSchedule(scheduleAttestation, zkpProof);
-      
-  //     if (result.success) {
-  //       console.log('📅 スケジュールアテステーション記録完了:', result.attestationUID);
-  //       return result.attestationUID!;
-  //     } else {
-  //       console.error('❌ スケジュールアテステーション記録失敗:', result.error);
-  //       return 'attestation_failed';
-  //     }
-  //   } catch (error) {
-  //     console.error('スケジュールアテステーション記録エラー:', error);
-  //     return 'attestation_error';
-  //   }
-  // }
+  /**
+   * ユーザーポリシーを動的ポリシーに変換
+   */
+  private createUserPolicy(): DynamicPolicy {
+    return this.integratedSystem.createDynamicPolicy('main_user', this.config.userPolicy);
+  }
 
   /**
-   * メッセージ内容の抽出
+   * メール内容抽出
    */
-  private extractMessageContent(message: GmailMessage) {
+  private extractMessageContent(message: GmailMessage): {
+    subject: string;
+    body: string;
+    from: string;
+    attachments: Array<{ filename: string; mimeType: string; data: Buffer }>;
+  } {
     const headers = message.payload.headers;
     const subject = headers.find(h => h.name === 'Subject')?.value || '';
     const from = headers.find(h => h.name === 'From')?.value || '';
-    
+
     let body = '';
     const attachments: Array<{ filename: string; mimeType: string; data: Buffer }> = [];
-    
-    // ボディテキストの抽出
+
+    // Extract body content
     if (message.payload.body?.data) {
-      body = Buffer.from(message.payload.body.data, 'base64').toString('utf-8');
+      body = Buffer.from(message.payload.body.data, 'base64').toString();
     } else if (message.payload.parts) {
       for (const part of message.payload.parts) {
         if (part.mimeType === 'text/plain' && part.body?.data) {
-          body += Buffer.from(part.body.data, 'base64').toString('utf-8');
+          body += Buffer.from(part.body.data, 'base64').toString();
         }
         
-        // 添付ファイルの処理
+        // Handle attachments
         if (part.filename && part.body?.data) {
           attachments.push({
             filename: part.filename,
@@ -564,71 +412,128 @@ export class EmailProcessor {
         }
       }
     }
-    
+
     return { subject, body, from, attachments };
   }
 
   /**
-   * システム健全性チェック
+   * ハッシュ生成
    */
-  async healthCheck() {
-    const checks = {
+  private generateHash(data: any): string {
+    return require('crypto').createHash('sha256').update(JSON.stringify(data)).digest('hex');
+  }
+
+  /**
+   * システム設定を取得
+   */
+  getSystemConfig() {
+    return {
+      localAI: this.config.localAI,
+      zkVM: this.config.zkVM,
+      payment: this.config.payment,
+      userPolicy: this.config.userPolicy,
+    };
+  }
+
+  /**
+   * システム状態を確認
+   */
+  async checkSystemHealth(): Promise<{
+    localAI: boolean;
+    zkVM: boolean;
+    payment: boolean;
+    gmail: boolean;
+  }> {
+    const health = {
+      localAI: false,
+      zkVM: false,
+      payment: false,
       gmail: false,
-      openai: false,
-      blockchain: false,
-      zkp: false
-      // eas: false
     };
 
     try {
-      // Gmail接続チェック
-      await this.gmailService.getNewMessages();
-      checks.gmail = true;
-    } catch (error) {
-      console.error('Gmail health check failed:', error);
-    }
-
-    try {
-      // OpenAI接続チェック（ダミー分類）
-      await this.aiClassifier.classifyAndExtract('test', 'test', 'test@example.com', []);
-      checks.openai = true;
-    } catch (error) {
-      console.error('OpenAI health check failed:', error);
-    }
-
-    try {
-      // ブロックチェーン接続チェック
-      await this.blockchainService.getTokenInfo(this.config.blockchain.jpycTokenAddress);
-      checks.blockchain = true;
-    } catch (error) {
-      console.error('Blockchain health check failed:', error);
-    }
-
-    try {
-      // ZKP回路ファイル存在チェック（軽量）
-      const zkpProver = this.zkpProver as any;
-      if (zkpProver.checkCircuitFiles && zkpProver.checkCircuitFiles()) {
-        checks.zkp = true;
-        console.log('✅ ZKP回路ファイル確認完了');
-      } else {
-        console.log('⚠️ ZKP回路ファイルが見つかりません - 手動検証モードで動作');
-        checks.zkp = true; // 手動検証モードでも動作可能
+      // Local AI health check
+      if (this.localAI) {
+        health.localAI = await this.localAI.testConnection();
       }
+
+      // zkVM health check
+      const zkVMEngine = new ZkVMPolicyEngine();
+      health.zkVM = await zkVMEngine.checkAvailability();
+
+      // Payment system health check
+      if (this.paymentExecutor) {
+        const balance = await this.paymentExecutor.getBalance();
+        health.payment = parseFloat(balance) > 0;
+      }
+
+      // Gmail health check
+      health.gmail = await this.gmailService.testConnection();
+
     } catch (error) {
-      console.error('ZKP health check failed:', error);
-      checks.zkp = true; // フォールバックモードで動作可能
+      console.error('Health check error:', error);
     }
-    
-    // try {
-    //   // EAS接続チェック
-    //   checks.eas = await this.easService.healthCheck();
-    // } catch (error) {
-    //   console.error('EAS health check failed:', error);
-    // }
-    
+
+    return health;
+  }
+
+  /**
+   * デフォルト設定を取得
+   */
+  static getDefaultConfig(): ProcessingConfig {
     return {
-      ...checks,
-      overall: Object.values(checks).every(check => check)
+      gmailCredentials: {
+        clientId: process.env.GOOGLE_CLIENT_ID || '',
+        clientSecret: process.env.GOOGLE_CLIENT_SECRET || '',
+        redirectUri: process.env.GOOGLE_REDIRECT_URI || '',
+        refreshToken: process.env.GOOGLE_REFRESH_TOKEN || '',
+      },
+      localAI: {
+        enabled: process.env.USE_LOCAL_AI === 'true',
+        apiUrl: process.env.LOCAL_AI_URL || 'http://localhost:11434',
+        model: process.env.LOCAL_AI_MODEL || 'llama3.1:8b',
+        fallbackToPatternMatching: true,
+      },
+      zkVM: {
+        enabled: true,
+        hostBinaryPath: 'zk/risc0/zkvm-policy-engine/target/debug/host',
+        timeout: 60000,
+      },
+      payment: {
+        enabled: process.env.ENABLE_PAYMENTS === 'true',
+        network: 'sepolia',
+        whitelistedAddresses: [
+          '0xE2F2E032B02584e81437bA8Df18F03d6771F9d23',
+          '0xF2431b618B5b02923922c525885DBfFcdb9DE853',
+        ],
+        maxAmount: 1000000, // 100万円
+      },
+      userPolicy: {
+        maxPerPayment: 200000,
+        maxPerDay: 1000000,
+        maxPerWeek: 5000000,
+        allowedVendors: [],
+        allowedHours: { start: 9, end: 18 },
+        allowedWeekdays: [1, 2, 3, 4, 5],
+        categoryRules: {
+          'cloud-services': { maxAmount: 300000, requireApproval: false },
+          'software': { maxAmount: 200000, requireApproval: true },
+          'utilities': { maxAmount: 100000, requireApproval: false },
+        },
+        conditionalRules: [
+          {
+            condition: 'amount > 150000',
+            action: 'require_approval',
+            parameters: { reason: 'High amount requires approval' },
+          },
+          {
+            condition: 'ai_confidence < 0.8',
+            action: 'require_approval',
+            parameters: { reason: 'Low AI confidence' },
+          },
+        ],
+        minAIConfidence: 0.7,
+      },
     };
   }
 } 
